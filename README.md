@@ -80,5 +80,4 @@ This app is ideal for **telecom companies, subscription-based services, and cust
 
 ---
 
-## 📜 License  
-This project is licensed under the **MIT License** – you are free to use, modify, and distribute it with attribution.  
+ 
