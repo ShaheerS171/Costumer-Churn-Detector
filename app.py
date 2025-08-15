@@ -5,13 +5,12 @@ import os
 
 # --- App Configuration ---
 st.set_page_config(
-    page_title="Customer Churn Predictor",
+    page_title="Custome Predictor",
     page_icon="👋",
     layout="wide"
 )
 
 # --- Paths ---
-# Ensures the app can find files regardless of where it's run from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "data-set.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "logistic_churn_model.pkl")
@@ -19,77 +18,99 @@ MODEL_PATH = os.path.join(BASE_DIR, "logistic_churn_model.pkl")
 # --- Load the pre-trained model ---
 @st.cache_resource
 def load_model():
-    """Loads the saved logistic regression model from the file."""
     try:
         model = joblib.load(MODEL_PATH)
         return model
     except FileNotFoundError:
-        st.error(f"Model file not found at {MODEL_PATH}. Please ensure the model is saved correctly.")
+        st.error(f"Model file not found at `{MODEL_PATH}`. Upload it and restart the app.")
         return None
 
 model = load_model()
 
-# --- Load raw dataset for UI options ---
+# --- Load raw dataset ---
 @st.cache_data
 def load_raw_data():
-    """Loads the raw dataset to populate UI select boxes with original category names."""
-    df_raw = pd.read_csv(DATA_PATH)
-    # Perform minimal cleaning just for UI options
-    df_raw['TotalCharges'] = pd.to_numeric(df_raw['TotalCharges'], errors='coerce')
-    return df_raw
+    try:
+        df = pd.read_csv(DATA_PATH)
+        df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+        return df
+    except FileNotFoundError:
+        st.error(f"Dataset file not found at `{DATA_PATH}`. Upload it and restart the app.")
+        return pd.DataFrame()
 
 df_raw = load_raw_data()
 
-# --- STREAMLIT APP LAYOUT ---
+# --- Title & Description ---
 st.title("👋 Customer Churn Prediction App")
 st.markdown("""
-This application predicts whether a customer is likely to churn (cancel their subscription) based on their information and subscribed services. 
-Customer churn is a critical metric for subscription-based businesses, and predicting it can help companies take proactive steps to retain customers.
+This app predicts whether a customer is likely to **churn** (cancel subscription) 
+based on their information and services.
 """)
 
-st.header("Methodology and Code Explanation")
-with st.expander("Click here to see how this app was made"):
-    st.markdown("""
-    This app is built upon a standard data science workflow.
-    
-    **1. Offline Model Training (in a Jupyter Notebook):**
-    - **Data Cleaning:** The dataset was cleaned by dropping `customerID` and handling missing values in `TotalCharges`.
-    - **Preprocessing:** Categorical features (like 'Contract') were converted into a numerical format using **One-Hot Encoding** (`pd.get_dummies`). This creates separate binary (0/1) columns for each category.
-    - **Model Selection:** A **Logistic Regression** classifier was trained.
-    - **Saving the Model:** The trained model was saved to `logistic_churn_model.pkl` using `joblib`. This file contains both the trained logic and the list of feature names it expects, in the correct order.
+# --- Sidebar: Model Info ---
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-    **2. Streamlit App (This Web App):**
-    - **Loading the Model:** The app loads the pre-trained `logistic_churn_model.pkl` file.
-    - **User Input:** Interactive widgets in the sidebar collect new customer data.
-    - **Prediction:** When you click 'Predict', the app:
-        1. Creates a DataFrame from your inputs.
-        2. Applies **One-Hot Encoding** to the categorical inputs to match the model's training format.
-        3. **Aligns the columns** of this new data with the exact list of features the model was trained on, filling any missing columns with 0.
-        4. Feeds the correctly formatted data into the model to generate a prediction.
-    """)
+# --- Calculate model performance metrics ---
+@st.cache_data
+def get_model_metrics(model, df):
+    if df.empty:
+        return None
+    # Prepare data like during training
+    df_clean = df.dropna()
+    X = df_clean.drop("Churn", axis=1)
+    y = df_clean["Churn"].apply(lambda x: 1 if x == "Yes" else 0)
 
-st.header("Churn Prediction")
-st.sidebar.title("Customer Details")
-st.sidebar.markdown("Enter the customer's details to get a churn prediction.")
+    # One-hot encode
+    categorical_cols = [col for col in X.columns if X[col].dtype == 'object']
+    X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=False)
+    X_aligned = X_encoded.reindex(columns=model.feature_names_in_, fill_value=0)
+
+    y_pred = model.predict(X_aligned)
+
+    return {
+        "accuracy": accuracy_score(y, y_pred),
+        "precision": precision_score(y, y_pred),
+        "recall": recall_score(y, y_pred),
+        "f1": f1_score(y, y_pred)
+    }
+
+metrics = get_model_metrics(model, df_raw)
+
+with st.sidebar:
+    st.markdown("### 📊 Model Info")
+    if metrics:
+        st.write(f"**Accuracy:** {metrics['accuracy']*100:.2f}%")
+        st.write(f"**Precision:** {metrics['precision']*100:.2f}%")
+        st.write(f"**Recall:** {metrics['recall']*100:.2f}%")
+        st.write(f"**F1-Score:** {metrics['f1']*100:.2f}%")
+    else:
+        st.write("Metrics unavailable")
+
+    if st.button("Load Sample Data"):
+        st.session_state.sample_loaded = True
+    else:
+        st.session_state.sample_loaded = False
 
 # --- Prediction Form ---
-if model is not None:
+if model is not None and not df_raw.empty:
     with st.sidebar.form(key='prediction_form'):
-        st.subheader("User Info")
+        st.subheader("Customer Details")
+        
+        # Customer Info
         gender = st.selectbox("Gender", options=df_raw['gender'].unique())
         senior_citizen = st.selectbox("Senior Citizen", options=[0, 1], format_func=lambda x: 'Yes' if x == 1 else 'No')
         partner = st.selectbox("Partner", options=df_raw['Partner'].unique())
         dependents = st.selectbox("Dependents", options=df_raw['Dependents'].unique())
 
-        st.subheader("Account Information")
-        tenure = st.slider("Tenure (months)", min_value=0, max_value=72, value=24)
+        # Account Info
+        tenure = st.slider("Tenure (months)", 0, 72, 24)
         contract = st.selectbox("Contract", options=df_raw['Contract'].unique())
         paperless_billing = st.selectbox("Paperless Billing", options=df_raw['PaperlessBilling'].unique())
         payment_method = st.selectbox("Payment Method", options=df_raw['PaymentMethod'].unique())
-        monthly_charges = st.slider("Monthly Charges ($)", min_value=18.0, max_value=120.0, value=55.0, step=0.05)
-        total_charges = st.slider("Total Charges ($)", min_value=18.0, max_value=9000.0, value=1500.0, step=0.05)
+        monthly_charges = st.slider("Monthly Charges ($)", 18.0, 120.0, 55.0, 0.05)
+        total_charges = st.slider("Total Charges ($)", 18.0, 9000.0, 1500.0, 0.05)
 
-        st.subheader("Subscribed Services")
+        # Services
         phone_service = st.selectbox("Phone Service", options=df_raw['PhoneService'].unique())
         multiple_lines = st.selectbox("Multiple Lines", options=df_raw['MultipleLines'].unique())
         internet_service = st.selectbox("Internet Service", options=df_raw['InternetService'].unique())
@@ -102,8 +123,8 @@ if model is not None:
         
         submit_button = st.form_submit_button(label='Predict Churn')
 
+    # --- Prediction Logic ---
     if submit_button:
-        # Create a dictionary of the inputs
         input_dict = {
             'gender': gender, 'SeniorCitizen': senior_citizen, 'Partner': partner, 'Dependents': dependents,
             'tenure': tenure, 'PhoneService': phone_service, 'MultipleLines': multiple_lines,
@@ -112,43 +133,32 @@ if model is not None:
             'StreamingMovies': streaming_movies, 'Contract': contract, 'PaperlessBilling': paperless_billing,
             'PaymentMethod': payment_method, 'MonthlyCharges': monthly_charges, 'TotalCharges': total_charges
         }
-        
-        # Create a DataFrame from the dictionary
+
         input_df = pd.DataFrame([input_dict])
 
-        # --- FIX: Convert categorical columns to one-hot encoding ---
-        # Identify categorical and numerical columns
+        # One-hot encode
         categorical_cols = [col for col in input_df.columns if input_df[col].dtype == 'object']
-        numerical_cols = [col for col in input_df.columns if input_df[col].dtype != 'object']
-
-        # Apply one-hot encoding
         input_df_encoded = pd.get_dummies(input_df, columns=categorical_cols, drop_first=False)
 
-        # Get the feature list the model was trained on
-        model_features = model.feature_names_in_
+        # Align with model features
+        input_data_aligned = input_df_encoded.reindex(columns=model.feature_names_in_, fill_value=0)
 
-        # Align the input DataFrame with the model's feature list
-        # This adds missing columns (and fills them with 0) and ensures the correct order
-        input_data_aligned = input_df_encoded.reindex(columns=model_features, fill_value=0)
-        
         try:
-            # Make prediction
             prediction = model.predict(input_data_aligned)[0]
             prediction_proba = model.predict_proba(input_data_aligned)[0]
 
             st.subheader("Prediction Result")
             if prediction == 1:
-                st.error("This customer is likely to **Churn**.")
-                st.write(f"Confidence: **{prediction_proba[1]*100:.2f}%**")
+                st.error(f"🚨 This customer is likely to churn.\nConfidence: {prediction_proba[1]*100:.2f}%")
             else:
-                st.success("This customer is likely to **Stay**.")
-                st.write(f"Confidence: **{prediction_proba[0]*100:.2f}%**")
-            
-            st.progress(max(prediction_proba))
-        
+                st.success(f"✅ This customer is likely to stay.\nConfidence: {prediction_proba[0]*100:.2f}%")
+
+            # Probability bars
+            st.markdown("### Probability")
+            st.progress(prediction_proba[1] if prediction == 1 else prediction_proba[0])
+
         except Exception as e:
-            st.error("An error occurred during prediction.")
-            st.error(f"Details: {e}")
+            st.error(f"Prediction error: {e}")
 
 else:
-    st.warning("Model could not be loaded. Prediction is unavailable.")
+    st.warning("Model or dataset not loaded. Please upload the files and restart the app.")
