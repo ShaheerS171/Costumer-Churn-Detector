@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import joblib
 import os
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # --- App Configuration ---
 st.set_page_config(
-    page_title="Customer Churn Predictor",
+    page_title="Custome Predictor",
     page_icon="👋",
     layout="wide"
 )
@@ -20,7 +19,8 @@ MODEL_PATH = os.path.join(BASE_DIR, "logistic_churn_model.pkl")
 @st.cache_resource
 def load_model():
     try:
-        return joblib.load(MODEL_PATH)
+        model = joblib.load(MODEL_PATH)
+        return model
     except FileNotFoundError:
         st.error(f"Model file not found at `{MODEL_PATH}`. Upload it and restart the app.")
         return None
@@ -47,25 +47,25 @@ This app predicts whether a customer is likely to **churn** (cancel subscription
 based on their information and services.
 """)
 
+# --- Sidebar: Model Info ---
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
 # --- Calculate model performance metrics ---
 @st.cache_data
-def get_model_metrics(df):
-    """Only cache metrics calculation — model loaded separately to avoid unhashable object error."""
+def get_model_metrics(model, df):
     if df.empty:
         return None
-
-    # Load model inside function to avoid passing unhashable object
-    local_model = joblib.load(MODEL_PATH)
-
+    # Prepare data like during training
     df_clean = df.dropna()
     X = df_clean.drop("Churn", axis=1)
     y = df_clean["Churn"].apply(lambda x: 1 if x == "Yes" else 0)
 
+    # One-hot encode
     categorical_cols = [col for col in X.columns if X[col].dtype == 'object']
     X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=False)
-    X_aligned = X_encoded.reindex(columns=local_model.feature_names_in_, fill_value=0)
+    X_aligned = X_encoded.reindex(columns=model.feature_names_in_, fill_value=0)
 
-    y_pred = local_model.predict(X_aligned)
+    y_pred = model.predict(X_aligned)
 
     return {
         "accuracy": accuracy_score(y, y_pred),
@@ -74,9 +74,8 @@ def get_model_metrics(df):
         "f1": f1_score(y, y_pred)
     }
 
-metrics = get_model_metrics(df_raw)
+metrics = get_model_metrics(model, df_raw)
 
-# --- Sidebar: Model Info ---
 with st.sidebar:
     st.markdown("### 📊 Model Info")
     if metrics:
@@ -96,7 +95,7 @@ with st.sidebar:
 if model is not None and not df_raw.empty:
     with st.sidebar.form(key='prediction_form'):
         st.subheader("Customer Details")
-
+        
         # Customer Info
         gender = st.selectbox("Gender", options=df_raw['gender'].unique())
         senior_citizen = st.selectbox("Senior Citizen", options=[0, 1], format_func=lambda x: 'Yes' if x == 1 else 'No')
@@ -121,7 +120,7 @@ if model is not None and not df_raw.empty:
         tech_support = st.selectbox("Tech Support", options=df_raw['TechSupport'].unique())
         streaming_tv = st.selectbox("Streaming TV", options=df_raw['StreamingTV'].unique())
         streaming_movies = st.selectbox("Streaming Movies", options=df_raw['StreamingMovies'].unique())
-
+        
         submit_button = st.form_submit_button(label='Predict Churn')
 
     # --- Prediction Logic ---
@@ -136,8 +135,12 @@ if model is not None and not df_raw.empty:
         }
 
         input_df = pd.DataFrame([input_dict])
+
+        # One-hot encode
         categorical_cols = [col for col in input_df.columns if input_df[col].dtype == 'object']
         input_df_encoded = pd.get_dummies(input_df, columns=categorical_cols, drop_first=False)
+
+        # Align with model features
         input_data_aligned = input_df_encoded.reindex(columns=model.feature_names_in_, fill_value=0)
 
         try:
@@ -150,11 +153,12 @@ if model is not None and not df_raw.empty:
             else:
                 st.success(f"✅ This customer is likely to stay.\nConfidence: {prediction_proba[0]*100:.2f}%")
 
-            # Probability bar
+            # Probability bars
             st.markdown("### Probability")
             st.progress(prediction_proba[1] if prediction == 1 else prediction_proba[0])
 
         except Exception as e:
             st.error(f"Prediction error: {e}")
+
 else:
     st.warning("Model or dataset not loaded. Please upload the files and restart the app.")
