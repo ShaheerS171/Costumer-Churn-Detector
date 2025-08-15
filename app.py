@@ -5,7 +5,7 @@ import os
 
 # --- App Configuration ---
 st.set_page_config(
-    page_title="Custome Predictor",
+    page_title="Customer hurn Predictor",
     page_icon="👋",
     layout="wide"
 )
